@@ -1,0 +1,216 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Dec 13 15:44:32 2022
+
+@author: modsv
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import csv
+import os
+import time
+
+tic =   time.time()
+
+# Realizar loop para iterar nome do arquivo
+os.chdir("Diretório com os relatórios")
+
+#headers = ['Mises', 'Nó','PEEQ','Nó','CPRESS','Nó','Geometria','x','y']
+headers = ['Mises','PEEQ','CPRESS_Esquerdo','Geometria Esquerda','x','y','CPRESS_Direito','Geometria Direita','x','y']
+with open('Diretório onde será salvo planilha/Outputs.csv','w') as fileS:
+    csvfile = csv.writer(fileS, delimiter=';', lineterminator='\n')
+    csvfile.writerow(headers)
+
+    i = 0
+    for i in range(0,10,1):
+        
+        # Pegar todos os arquivos 
+        job_name = 'Job-1.rpt'
+        j_n = list(job_name)
+        ii = i+1
+        float(ii)
+        j_n[4] = str(ii)
+        job_name = "".join(j_n)
+        
+        #job_name = 'NS.rpt'
+        
+        texto = pd.read_fwf(
+            job_name,header=None)   
+        
+        texto = texto[0].str.split('    ', expand=True)
+        
+        u = []
+        node_u = []
+        mises = []
+        node_mises = []
+        peeq = []
+        node_peeq = []
+        cpress = []
+        node_cpress = []
+        vetor_iter = []
+        
+        iteracao = 0
+        for index, row in texto.iterrows():
+            if iteracao == 0 or iteracao == 3 or iteracao == 6 or iteracao == 9:
+                # Encontrar U
+                if 'Maximum' in row[0]:
+                    iteracao = iteracao + 1
+                    valor_u = float(texto.iloc[index][2])
+                    u.append(valor_u)
+                    
+                    # Nó onde ocorre maior PEEQ
+                    ind = index+1 
+                    node =  float(texto.iloc[ind][3])
+                    node_u.append(node)
+                    
+            
+            elif iteracao == 1 or iteracao == 4 or iteracao == 7 or iteracao == 10:
+                # Encontrar PEEQ
+                if 'Maximum' in row[0]:
+                    iteracao = iteracao + 1
+                    valor_peeq = float(texto.iloc[index][2])
+                    peeq.append(valor_peeq)
+                    
+                    # Nó onde ocorre maior Mises
+                    ind = index+1
+                    node =  float(texto.iloc[ind][3])
+                    node_peeq.append(node)
+                    
+            
+            elif iteracao == 2 or iteracao == 5 or iteracao == 8 or iteracao == 11:
+                # Encontrar Mises
+                if 'Maximum' in row[0]:
+                    iteracao = iteracao + 1
+                    valor_mises = float(texto.iloc[index][2])
+                    mises.append(valor_mises)
+                    
+                    # Nó onde ocorre maior Mises
+                    ind = index+1
+                    node =  float(texto.iloc[ind][3])
+                    node_mises.append(node)
+                    
+            
+            elif iteracao == 12:
+                if 'Maximum' in row[0]:
+                    iteracao = iteracao + 1
+            else:
+                # Encontrar CPRESS
+                if 'Maximum' in row[0]:
+                    # Auxiliar para saber em que geometria está a maior pressão de contato.
+                    vetor_iter.append(iteracao)
+                    
+                    iteracao = iteracao + 1
+                    valor_cpress = float(texto.iloc[index][10])
+                    cpress.append(valor_cpress)
+                    
+                    # Nó onde ocorre maior CPRESS
+                    ind = index+3
+                    node =  float(texto.iloc[ind][11])
+                    node_cpress.append(node)
+                    
+        
+        ite = i+1
+        max_mises = max(mises)
+        max_peeq = max(peeq)
+        max_cpress = max(cpress)
+        
+        # Posição no vetor do maior elemento
+        p_mises = mises.index(max_mises)
+        p_peeq = peeq.index(max_peeq)
+        p_cpress = cpress.index(max_cpress)
+        
+        # Obter o nó referente ao maior valor
+        n_mises = node_mises[p_mises]
+        n_peeq = node_peeq[p_peeq]
+        n_cpress = node_cpress[p_cpress]
+        
+        # Saber em qual geometria está a maior pressão de contato
+        v_iter = vetor_iter[p_cpress]
+        
+        cpress_direito = [cpress[0],cpress[2]]
+        cpress_esquerdo = [cpress[1],cpress[3]]
+        
+        if cpress_direito.index(max(cpress_direito)) == 0:
+            geometria_direita = 'Roda_Direita'
+            node_direita = node_cpress[0]
+        else:
+            geometria_direita = 'Trilho_Direito'
+            node_direita = node_cpress[2]
+        
+        if cpress_esquerdo.index(max(cpress_esquerdo)) == 0:
+            geometria_esquerda = 'Roda_Esquerda'
+            node_esquerda = node_cpress[1]
+        else:
+            geometria_esquerda = 'Trilho_Esquerdo'
+            node_esquerda = node_cpress[3]
+        
+        max_cpress_direito = max(cpress_direito)
+        max_cpress_esquerdo = max(cpress_esquerdo)
+        
+        # Ler os inps
+        
+        # Pegar todos os arquivos 
+        job_name = 'Job-1.inp'
+        j_n = list(job_name)
+        ii = i+1
+        float(ii)
+        j_n[4] = str(ii)
+        job_name = "".join(j_n)
+        
+        text_inp = pd.read_fwf(
+            job_name,header=None)
+
+        text_inp = text_inp[0].str.split(',', expand=True)
+        tam = len(text_inp)
+
+        #a = 'Flag'
+        
+        #if v_iter == 13:
+        #    geometria = 'Roda_Direita' 
+        #elif v_iter == 14:
+        #    geometria = 'Roda_Esquerda'
+        #elif v_iter == 15:
+        #    geometria = 'Trilho_Direito'
+        #else:
+        #    geometria = 'Trilho_Esquerdo'
+        
+        geom_direita_inp = 'name=' + geometria_direita
+        geom_esquerda_inp = 'name=' + geometria_esquerda
+        
+        #node_direita = str(node_direita)
+        #node_esquerda = str(node_esquerda)
+        #print(geom_inp)
+
+        #n_cpress = int(n_cpress)
+        #n_cpress = str(n_cpress)
+        
+        for index, row in text_inp.iterrows():
+            if '*Part' in row[0] and geom_direita_inp in row[1]:
+                ind = index+2
+                for i in range(ind,10000000,1):
+                    if float(text_inp.iloc[i][0]) == node_direita:
+                        xd = float(text_inp.iloc[i][1])
+                        yd = float(text_inp.iloc[i][2])
+                        break;
+        
+        for index, row in text_inp.iterrows():
+            if '*Part' in row[0] and geom_esquerda_inp in row[1]:
+                ind = index+2
+                for i in range(ind,10000000,1):
+                    if float(text_inp.iloc[i][0]) == node_esquerda:
+                        xe = float(text_inp.iloc[i][1])
+                        ye = float(text_inp.iloc[i][2])
+                        break;
+        
+        #print('Iteracao: ', ite)
+        print(ii)
+        
+        csvfile.writerow([max_mises,max_peeq,max_cpress_esquerdo,geometria_esquerda,xe,ye,max_cpress_direito,geometria_direita,xd,yd])
+
+toc = time.time()
+
+time = toc-tic
+
+print("Tempo:",time,"s")
