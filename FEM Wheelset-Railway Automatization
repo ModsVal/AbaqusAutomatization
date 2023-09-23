@@ -1,0 +1,897 @@
+# -*- coding: utf-8 -*-
+# Do not delete the following import lines
+
+from abaqus import *
+from abaqusConstants import *
+from caeModules import *
+import math as mt
+import numpy as np
+import random
+import os
+import part
+import section
+import regionToolset
+import displayGroupMdbToolset as dgm
+import part
+import material
+import assembly
+import optimization
+import step
+import interaction
+import load
+import mesh
+import job
+import sketch
+import visualization
+import xyPlot
+import displayGroupOdbToolset as dgo
+import connectorBehavior
+
+from driverUtils import executeOnCaeStartup
+from odbAccess import *
+import itertools
+import csv
+
+nucleos = 1
+simulacoes = 2000
+
+os.chdir("Diretório dos Perfis")
+
+# --------------------------------------
+# GERAR GEOMETRIAS
+# --------------------------------------
+
+# Acessar banco de dados
+
+arq = open('Banco de Dados_ALL_Rodas.txt','r')  #abre o arquivo
+texto_roda = []  #declaro um vetor
+texto_roda = arq.readlines() #quebra as linhas do arquivo em vetores
+
+for i in range(len(texto_roda)):
+    texto_roda[i] = texto_roda[i].strip('\n')
+
+arq.close()
+
+arq = open('Banco de Dados_ALL_Trilhos_1.txt','r')  #abre o arquivo
+texto_trilho = []  #declaro um vetor
+texto_trilho = arq.readlines() #quebra as linhas do arquivo em vetores
+
+for i in range(len(texto_trilho)):
+    texto_trilho[i] = texto_trilho[i].strip('\n')
+
+arq.close()
+
+aux = 0
+val = simulacoes
+
+headers = ['Roda_Esquerda','Roda_Direita','Trilho_Esquerdo','Trilho_Direito']
+with open('Diretório/Rotulos.csv','w') as fileS:
+    csvfile = csv.writer(fileS, delimiter=';', lineterminator='\n')
+    csvfile.writerow(headers)
+
+    for aux in range(val):
+        
+        Mdb()
+        
+        os.chdir("Diretório dos Perfis")
+        # ------------------------------------------
+        # Roda Esquerda
+        # ------------------------------------------
+        
+        roda_esquerda = random.choice(texto_roda)
+        #roda_esquerda = 'Roda 9.txt'
+        model = 'Model-1'
+
+        wRModel = mdb.models[model]
+        s = mdb.models['Model-1'].ConstrainedSketch(name='wheel CS Profile',sheetSize=200.0)
+        g,v,d,c=s.geometry,s.vertices,s.dimensions,s.constraints
+        s.setPrimaryObject(option=STANDALONE)
+
+        wheel_name = 'Roda_Esquerda'
+        arquivo = roda_esquerda
+
+        x=[]
+        y=[]
+
+        x = np.loadtxt(arquivo)[:,0]
+        y = np.loadtxt(arquivo)[:,1]
+
+        tam = np.size(x)
+        tam = tam-1
+        
+        #Técnica bubble sort para organizar os pontos em ordem crescente
+        for j in range(tam):
+            for k in range(j):
+                if x[k] > x[k+1]:
+                    guardax = x[k]
+                    guarday = y[k]
+                    x[j] = x[k+1]
+                    y[j] = y[k+1]
+                    x[k+1] = guardax
+                    y[k+1] = guarday
+
+        #Gerar geometria com as splines
+        if False:
+            lines = []
+            for i in range(n_ponints-1):
+                line = s.Line(point1=(x[i],y[i]), point2=(x[i+1],y[i+1]))
+                lines.append(line)
+        else:
+            line = s.Spline(zip(x,y))
+            lines = [line,]
+            #fpx = x[i]
+            #fpy = y[i]
+
+        #Gerar complementação da geometria
+        fpx = x[tam]
+        fpy = y[tam]
+        ipx = x[0]
+        ipy = y[0]
+        auxy = fpy-30
+        
+        
+        RP_WL_x = (ipx+fpx)/2
+        
+        #Rotação de coordenadas
+        origem = (fpx,fpy)
+        alpha = mt.radians(180)
+        
+        xr = (RP_WL_x-fpx)*mt.cos(alpha) + (auxy-fpy)*mt.sin(alpha) + fpx
+        yr = -(RP_WL_x-fpx)*mt.sin(alpha) + (auxy-fpy)*mt.cos(alpha) + fpy
+        
+        # Coordenada do ponto que será utilizado como referência para a nova translação.
+        x_desloc_esquerda = (ipx-fpx)*mt.cos(alpha) + (auxy-fpy)*mt.sin(alpha) + fpx
+        y_desloc_esquerda = -(ipx-fpx)*mt.sin(alpha) + (auxy-fpy)*mt.cos(alpha) + fpy
+        
+        CO_WL = np.array([x_desloc_esquerda,y_desloc_esquerda,0])
+        
+        RP_WL = np.array([xr,yr,0])
+        
+        #RP_WL = np.array([RP_WL_x,auxy,0])
+        
+        s.Line(point1=(fpx,fpy), point2=(fpx, auxy))
+        s.Line(point1=(fpx, auxy), point2=(ipx, auxy))
+        s.Line(point1=(ipx, auxy), point2=(ipx, ipy))
+
+        s.rotate(centerPoint=(fpx,fpy), angle=180.0, objectList=(g[2],g[3],g[4],g[5]))
+        s.unsetPrimaryObject()
+
+        wRP = wRModel.Part(name=wheel_name, dimensionality=TWO_D_PLANAR, 
+            type=DEFORMABLE_BODY)
+        wRP.BaseShell(sketch=s)
+        session.viewports['Viewport: 1'].setValues(displayedObject=wRP)
+        del wRModel.sketches['wheel CS Profile']
+
+        # -----------------------------------------
+        # Roda Direita
+        # -----------------------------------------
+
+        roda_direita = random.choice(texto_roda)
+        
+        #roda_direita = 'Roda 3.txt'
+
+        wLModel = mdb.models['Model-1']
+        s = mdb.models['Model-1'].ConstrainedSketch(name='wheel CS Profile',sheetSize=200.0)
+        g,v,d,c=s.geometry,s.vertices,s.dimensions,s.constraints
+        s.setPrimaryObject(option=STANDALONE)
+
+        wheel_name = 'Roda_Direita'
+        arquivo = roda_direita
+
+        #file
+        x=[]
+        y=[]
+
+        x = np.loadtxt(arquivo)[:,0]
+        y = np.loadtxt(arquivo)[:,1]
+
+        tam = np.size(x)
+        tam = tam-1
+        
+        for j in range(tam):
+            for k in range(j):
+                if x[k] > x[k+1]:
+                    guardax = x[k]
+                    guarday = y[k]
+                    x[j] = x[k+1]
+                    y[j] = y[k+1]
+                    x[k+1] = guardax
+                    y[k+1] = guarday
+
+        #Gerar geometria com as splines
+        if False:
+            lines = []
+            for i in range(n_ponints-1):
+                line = s.Line(point1=(x[i],y[i]), point2=(x[i+1],y[i+1]))
+                lines.append(line)
+        else:
+            line = s.Spline(zip(x,y))
+            lines = [line,]
+            #fpx = x[i]
+            #fpy = y[i]
+
+        #Gerar complementação da geometria
+        fpx = x[tam]
+        fpy = y[tam]
+        ipx = x[0]
+        ipy = y[0]
+        auxy = fpy-30
+        
+        RP_WR_x = (ipx+fpx)/2
+        RP_WR = np.array([RP_WR_x,auxy,0])
+        
+        CO_WR = np.array([ipx,auxy,0])
+        
+        s.Line(point1=(fpx,fpy), point2=(fpx, auxy))
+        s.Line(point1=(fpx, auxy), point2=(ipx, auxy))
+        s.Line(point1=(ipx, auxy), point2=(ipx, ipy))
+
+        #s.rotate(centerPoint=(ipx,auxy), angle=180.0, objectList=(g[2],g[3],g[4],g[5]))
+        #s.unsetPrimaryObject()
+        
+        s.mirror(mirrorLine=g[4], objectList=(g[2], g[3], g[4], g[5]))
+        s.unsetPrimaryObject()
+
+        wLP = wLModel.Part(name=wheel_name, dimensionality=TWO_D_PLANAR, 
+            type=DEFORMABLE_BODY)
+        wLP.BaseShell(sketch=s)
+        session.viewports['Viewport: 1'].setValues(displayedObject=wLP)
+        del wLModel.sketches['wheel CS Profile']
+
+        # ------------------------------------------------
+        # Trilho - Direito
+        # ------------------------------------------------
+
+        railModel = mdb.models['Model-1']
+        
+        s = railModel.ConstrainedSketch(name='rail CS Profile', sheetSize = 50)
+
+        g, v, d, c = s.geometry, s.vertices, s.dimensions, s.constraints
+        s.setPrimaryObject(option=STANDALONE)
+        s.ConstructionLine(point1=(0,-100), point2=(0,100))
+        s.FixedConstraint(entity=g[2])
+
+        #Variáveis iniciais que ajudarão na geração dos nomes das geometrias
+        #geom_rail_right = 'Trilho 2.txt'
+        geom_rail_right = random.choice(texto_trilho)
+        l = list(geom_rail_right)
+
+        rail_name = 'Trilho_Direito'
+        r_n = list(rail_name)
+        
+        arquivo = geom_rail_right
+
+        #Acessar os documentos e realizar os devidos tratamentos
+
+        x=[]
+        y=[]
+
+        x = np.loadtxt(arquivo)[:,0]
+        y = np.loadtxt(arquivo)[:,1]
+
+        tam = np.size(x)
+        tam = tam-1
+        
+        #Técnica bubble sort para organizar os pontos em ordem crescente
+        #for j in range(tam):
+        #    for k in range(j):
+        #        if x[k] > x[k+1]:
+        #            guardax = x[k]
+        #            guarday = y[k]
+        #            x[j] = x[k+1]
+        #            y[j] = y[k+1]
+        #            x[k+1] = guardax
+        #            y[k+1] = guarday
+
+        #Gerar geometria com as splines
+        if False:
+            lines = []
+            for i in range(n_ponints-1):
+                line = s.Line(point1=(x[i],y[i]), point2=(x[i+1],y[i+1]))
+                lines.append(line)
+        else:
+            line = s.Spline(zip(x,y))
+            lines = [line,]
+            #fpx = x[i]
+            #fpy = y[i]
+
+        #Gerar complementação da geometria
+        fpx = x[tam]
+        fpy = y[tam]
+        ipx = x[0]
+        ipy = y[0]
+        auxy = fpy-15
+        
+        # Colocar sinal de menos no RP_RR_x por causa do mirror.
+        RP_RR_x = -(ipx+fpx)/2
+        #RP_RR_x = fpx + (fpx-RP_RR_x)
+        RP_RR = np.array([RP_RR_x,ipy,0])
+        
+        CO_RR = np.array([-fpx,fpy,0])
+        
+        s.Line(point1=(fpx,fpy), point2=(ipx, ipy))
+        #s.Line(point1=(fpx,fpy), point2=(fpx, auxy))
+        #s.Line(point1=(fpx, auxy), point2=(ipx, auxy))
+        #s.Line(point1=(ipx, auxy), point2=(ipx, ipy))
+        
+        s.mirror(mirrorLine=g[2], objectList=(g[2], g[3], g[4]))
+        s.unsetPrimaryObject()
+
+        railPart = railModel.Part(name=rail_name, dimensionality=TWO_D_PLANAR, 
+            type=DEFORMABLE_BODY)
+        railPart.BaseShell(sketch=s)
+        session.viewports['Viewport: 1'].setValues(displayedObject=railPart)
+        del railModel.sketches['rail CS Profile']
+        
+        # ------------------------------------------------
+        # Trilho - Esquerdo
+        # ------------------------------------------------
+        
+        railModel = mdb.models['Model-1']
+        
+        s = railModel.ConstrainedSketch(name='rail CS Profile', sheetSize = 50)
+
+        g, v, d, c = s.geometry, s.vertices, s.dimensions, s.constraints
+        s.setPrimaryObject(option=STANDALONE)
+        s.ConstructionLine(point1=(0,-100), point2=(0,100))
+        s.FixedConstraint(entity=g[2])
+
+        #Variáveis iniciais que ajudarão na geração dos nomes das geometrias
+        #geom_rail_left = 'Trilho 1.txt'
+        
+        geom_rail_left = random.choice(texto_trilho)
+        
+        #geom_rail_left = 'Trilho 39.txt'
+        l = list(geom_rail_left)
+
+        rail_name = 'Trilho_Esquerdo'
+        r_n = list(rail_name)
+        
+        arquivo = geom_rail_left
+
+        #Acessar os documentos e realizar os devidos tratamentos
+
+        x=[]
+        y=[]
+
+        x = np.loadtxt(arquivo)[:,0]
+        y = np.loadtxt(arquivo)[:,1]
+
+        tam = np.size(x)
+        tam = tam-1
+        
+        #Técnica bubble sort para organizar os pontos em ordem crescente
+        #for j in range(tam):
+        #    for k in range(j):
+        #        if x[k] > x[k+1]:
+        #            guardax = x[k]
+        #            guarday = y[k]
+        #            x[j] = x[k+1]
+        #            y[j] = y[k+1]
+        #            x[k+1] = guardax
+        #            y[k+1] = guarday
+
+        #Gerar geometria com as splines
+        if False:
+            lines = []
+            for i in range(n_ponints-1):
+                line = s.Line(point1=(x[i],y[i]), point2=(x[i+1],y[i+1]))
+                lines.append(line)
+        else:
+            line = s.Spline(zip(x,y))
+            lines = [line,]
+            #fpx = x[i]
+            #fpy = y[i]
+
+        #Gerar complementação da geometria
+        fpx = x[tam]
+        fpy = y[tam]
+        ipx = x[0]
+        ipy = y[0]
+        auxy = fpy-15
+        
+        RP_RL_x = (ipx+fpx)/2
+        RP_RL = np.array([RP_RL_x,ipy,0])
+        
+        CO_RL = np.array([fpx,fpy,0])
+
+        s.Line(point1=(fpx,fpy), point2=(ipx, ipy))
+        #s.Line(point1=(fpx,fpy), point2=(fpx, auxy))
+        #s.Line(point1=(fpx, auxy), point2=(ipx, auxy))
+        #s.Line(point1=(ipx, auxy), point2=(ipx, ipy))
+        
+        #s.mirror(mirrorLine=g[2], objectList=(g[2], g[3], g[4], g[5], g[6]))
+        #s.unsetPrimaryObject()
+
+        railPart = railModel.Part(name=rail_name, dimensionality=TWO_D_PLANAR, 
+            type=DEFORMABLE_BODY)
+        railPart.BaseShell(sketch=s)
+        session.viewports['Viewport: 1'].setValues(displayedObject=railPart)
+        del railModel.sketches['rail CS Profile']
+        
+        # -------------------------------------------------
+        # PROPRIEDADES E SEÇÕES
+        # -------------------------------------------------
+        
+        # Definir materiais - Roda
+        mdb.models['Model-1'].Material(name='Aço - Roda')
+        mdb.models['Model-1'].materials['Aço - Roda'].Elastic(table=((210000.0, 0.3), 
+            ))
+        mdb.models['Model-1'].materials['Aço - Roda'].Plastic(table=((900.0, 0.0), 
+            ))
+        
+        # Definir materiais - Trilho
+        mdb.models['Model-1'].Material(name='Aço - Trilho')
+        mdb.models['Model-1'].materials['Aço - Trilho'].Elastic(table=((210000.0, 0.3), 
+            ))
+        mdb.models['Model-1'].materials['Aço - Trilho'].Plastic(table=((890.0, 
+            0.0), ))
+        
+        # Criar seção e associar com material - Roda
+        mdb.models['Model-1'].HomogeneousSolidSection(name='Roda', 
+            material='Aço - Roda', thickness=None)
+            
+        # Criar seção e associar com material - Trilho
+        mdb.models['Model-1'].HomogeneousSolidSection(name='Trilho', 
+            material='Aço - Trilho', thickness=None)
+        
+        # Aplicar Seção - Roda_Direita
+        p = mdb.models['Model-1'].parts['Roda_Direita']
+        f = p.faces
+        faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
+        region = p.Set(faces=faces, name='All')
+        p = mdb.models['Model-1'].parts['Roda_Direita']
+        p.SectionAssignment(region=region, sectionName='Roda', offset=0.0, 
+            offsetType=MIDDLE_SURFACE, offsetField='', 
+            thicknessAssignment=FROM_SECTION)
+        
+        # Aplicar Seção - Roda_Esquerda
+        p = mdb.models['Model-1'].parts['Roda_Esquerda']
+        f = p.faces
+        faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
+        region = p.Set(faces=faces, name='All')
+        p = mdb.models['Model-1'].parts['Roda_Esquerda']
+        p.SectionAssignment(region=region, sectionName='Roda', offset=0.0, 
+            offsetType=MIDDLE_SURFACE, offsetField='', 
+            thicknessAssignment=FROM_SECTION)
+        
+        # Aplicar Seção - Trilho
+        p = mdb.models['Model-1'].parts['Trilho_Esquerdo']
+        f = p.faces
+        faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
+        region = p.Set(faces=faces, name='All')
+        p = mdb.models['Model-1'].parts['Trilho_Esquerdo']
+        p.SectionAssignment(region=region, sectionName='Trilho', offset=0.0, 
+            offsetType=MIDDLE_SURFACE, offsetField='', 
+            thicknessAssignment=FROM_SECTION)
+        
+        # Aplicar Seção - Trilho
+        p = mdb.models['Model-1'].parts['Trilho_Direito']
+        f = p.faces
+        faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
+        region = p.Set(faces=faces, name='All')
+        p = mdb.models['Model-1'].parts['Trilho_Direito']
+        p.SectionAssignment(region=region, sectionName='Trilho', offset=0.0, 
+            offsetType=MIDDLE_SURFACE, offsetField='', 
+            thicknessAssignment=FROM_SECTION)
+        
+        # ------------------------------------------
+        # ASSEMBLY
+        # ------------------------------------------
+        
+        a = mdb.models['Model-1'].rootAssembly
+        session.viewports['Viewport: 1'].setValues(displayedObject=a)
+        session.viewports['Viewport: 1'].assemblyDisplay.setValues(
+            optimizationTasks=OFF, geometricRestrictions=OFF, stopConditions=OFF)
+        a = mdb.models['Model-1'].rootAssembly
+        a.DatumCsysByDefault(CARTESIAN)
+        
+        session.viewports['Viewport: 1'].view.fitView()
+        
+        # Inserir as instâncias no assembly
+        p = mdb.models['Model-1'].parts['Roda_Esquerda']
+        a.Instance(name='Roda_Esquerda-1', part=p, dependent=ON)
+        p = mdb.models['Model-1'].parts['Roda_Direita']
+        a.Instance(name='Roda_Direita-1', part=p, dependent=ON)
+        p = mdb.models['Model-1'].parts['Trilho_Esquerdo']
+        a.Instance(name='Trilho_Esquerdo-1', part=p, dependent=ON)
+        a = mdb.models['Model-1'].rootAssembly
+        p = mdb.models['Model-1'].parts['Trilho_Direito']
+        a.Instance(name='Trilho_Direito-1', part=p, dependent=ON)
+        a = mdb.models['Model-1'].rootAssembly
+        
+        session.viewports['Viewport: 1'].view.fitView()
+        
+        # Inserir pontos de referência
+        
+        # Trilho_Esquerdo
+        e1 = a.instances['Trilho_Esquerdo-1'].edges
+        a.ReferencePoint(point=a.instances['Trilho_Esquerdo-1'].InterestingPoint(edge=e1[0], 
+            rule=MIDDLE))
+        RP_rail_left = a.instances['Trilho_Esquerdo-1'].referencePoints
+        a = mdb.models['Model-1'].rootAssembly
+        
+        # Trilho_Direito
+        e11 = a.instances['Trilho_Direito-1'].edges
+        a.ReferencePoint(point=a.instances['Trilho_Direito-1'].InterestingPoint(edge=e11[0], 
+            rule=MIDDLE))
+        RP_rail_right = a.instances['Trilho_Direito-1'].referencePoints
+        a = mdb.models['Model-1'].rootAssembly
+        
+        # Roda_Esquerda
+        e1 = a.instances['Roda_Esquerda-1'].edges
+        a.ReferencePoint(point=a.instances['Roda_Esquerda-1'].InterestingPoint(edge=e1[1], 
+            rule=MIDDLE))
+        RP_wheel_left = a.instances['Roda_Esquerda-1'].referencePoints
+        a = mdb.models['Model-1'].rootAssembly
+        
+        # Roda_Direita
+        e11 = a.instances['Roda_Direita-1'].edges
+        a.ReferencePoint(point=a.instances['Roda_Direita-1'].InterestingPoint(
+            edge=e11[3], rule=MIDDLE))
+        RP_wheel_right = a.instances['Roda_Direita-1'].referencePoints
+        a = mdb.models['Model-1'].rootAssembly
+        
+        # Rodeiro
+        a.DatumPointByCoordinate(coords=(0.0, 45.0, 0.0))
+        a = mdb.models['Model-1'].rootAssembly
+        d1 = a.datums
+        a.ReferencePoint(point=d1[14])
+        a = mdb.models['Model-1'].rootAssembly
+        
+        # Criar sets para os pontos de referências
+        r1 = a.referencePoints
+        refPoints1=(r1[10], )
+        a.Set(referencePoints=refPoints1, name='RP_Base_Trilho_Esquerdo')
+        a = mdb.models['Model-1'].rootAssembly
+        r1 = a.referencePoints
+        refPoints1=(r1[11], )
+        a.Set(referencePoints=refPoints1, name='RP_Base_Trilho_Direito')
+        a = mdb.models['Model-1'].rootAssembly
+        r1 = a.referencePoints
+        refPoints1=(r1[12], )
+        a.Set(referencePoints=refPoints1, name='RP_Base_Roda_Esquerda')
+        a = mdb.models['Model-1'].rootAssembly
+        r1 = a.referencePoints
+        refPoints1=(r1[13], )
+        a.Set(referencePoints=refPoints1, name='RP_Base_Roda_Direita')
+        #a = mdb.models['Model-1'].rootAssembly
+        #r1 = a.referencePoints
+        #refPoints1=(r1[14], )
+        #a.Set(referencePoints=refPoints1, name='RP_Rodeiro')
+        #a = mdb.models['Model-1'].rootAssembly
+        
+        # Processamento para determinar o vetor de deslocamento
+        origem = np.array([0,0,0])
+        rail_left_vector = -CO_RL + origem
+        rail_right_vector = -CO_RR + origem
+        wheel_left_vector = origem - CO_WL
+        wheel_right_vector = origem - CO_WR  
+        
+        
+        # Translação das peças
+        
+        # Trilho_Esquerdo
+        a.translate(instanceList=('Trilho_Esquerdo-1', ), vector=(rail_left_vector))
+        a = mdb.models['Model-1'].rootAssembly
+        a.translate(instanceList=('Trilho_Esquerdo-1', ), vector=(-500.0, -35, 0.0))
+        a = mdb.models['Model-1'].rootAssembly
+        
+        # Trilho_Direito
+        a.translate(instanceList=('Trilho_Direito-1', ), vector=(rail_right_vector))
+        a = mdb.models['Model-1'].rootAssembly
+        a.translate(instanceList=('Trilho_Direito-1', ), vector=(500.0, -35, 0.0))
+        a = mdb.models['Model-1'].rootAssembly
+        
+        # O ponto é de 45 em y para as famílias 1 e 3
+        # O ponto é de 37 em y para a família 2
+        
+        # Roda_Esquerda
+        a.translate(instanceList=('Roda_Esquerda-1', ), vector=(wheel_left_vector))
+        a = mdb.models['Model-1'].rootAssembly
+        a.translate(instanceList=('Roda_Esquerda-1', ), vector=(-464.0, 45.0, 0.0))
+        a = mdb.models['Model-1'].rootAssembly
+        
+        # Roda_Direita
+        a.translate(instanceList=('Roda_Direita-1', ), vector=(wheel_right_vector))
+        a = mdb.models['Model-1'].rootAssembly
+        a.translate(instanceList=('Roda_Direita-1', ), vector=(464.0, 45.0, 0.0))
+        a = mdb.models['Model-1'].rootAssembly
+        
+        # Aplicar cant nos trilhos
+        a1 = mdb.models['Model-1'].rootAssembly
+        a1.rotate(instanceList=('Trilho_Esquerdo-1', ), axisPoint=(-500.0, -35, 0.0), 
+            axisDirection=(0.0, 0.0, 1.0), angle=-1.4)
+        a1 = mdb.models['Model-1'].rootAssembly
+        a1.rotate(instanceList=('Trilho_Direito-1', ), axisPoint=(500.0, -35, 0.0), 
+            axisDirection=(0.0, 0.0, 1.0), angle=1.4)
+        
+        session.viewports['Viewport: 1'].view.fitView()
+        
+        # Criar sets para as bases das geometrias
+        
+        e1 = a.instances['Trilho_Esquerdo-1'].edges
+        edges1 = e1.getSequenceFromMask(mask=('[#1 ]', ), )
+        a.Set(edges=edges1, name='Base_Trilho_Esquerdo') 
+        a = mdb.models['Model-1'].rootAssembly
+        
+        e1 = a.instances['Trilho_Direito-1'].edges
+        edges1 = e1.getSequenceFromMask(mask=('[#1 ]', ), )
+        a.Set(edges=edges1, name='Base_Trilho_Direito')
+        a = mdb.models['Model-1'].rootAssembly
+        
+        e1 = a.instances['Roda_Direita-1'].edges
+        edges1 = e1.getSequenceFromMask(mask=('[#8 ]', ), )
+        a.Set(edges=edges1, name='Base_Roda_Direita')
+        a = mdb.models['Model-1'].rootAssembly
+        
+        e1 = a.instances['Roda_Esquerda-1'].edges
+        edges1 = e1.getSequenceFromMask(mask=('[#2 ]', ), )
+        a.Set(edges=edges1, name='Base_Roda_Esquerda')
+        session.viewports['Viewport: 1'].assemblyDisplay.setValues(
+            adaptiveMeshConstraints=ON)
+        
+        # Criar surfaces
+        
+        a = mdb.models['Model-1'].rootAssembly
+        s1 = a.instances['Trilho_Esquerdo-1'].edges
+        side1Edges1 = s1.getSequenceFromMask(mask=('[#2 ]', ), )
+        a.Surface(side1Edges=side1Edges1, name='Contato_Trilho_Esquerdo')
+        a = mdb.models['Model-1'].rootAssembly
+        s1 = a.instances['Trilho_Direito-1'].edges
+        side1Edges1 = s1.getSequenceFromMask(mask=('[#2 ]', ), )
+        a.Surface(side1Edges=side1Edges1, name='Contato_Trilho_Direito')
+        a = mdb.models['Model-1'].rootAssembly
+        s1 = a.instances['Roda_Esquerda-1'].edges
+        side1Edges1 = s1.getSequenceFromMask(mask=('[#9 ]', ), )
+        a.Surface(side1Edges=side1Edges1, name='Contato_Roda_Esquerda')
+        a = mdb.models['Model-1'].rootAssembly
+        s1 = a.instances['Roda_Direita-1'].edges
+        side1Edges1 = s1.getSequenceFromMask(mask=('[#3 ]', ), )
+        a.Surface(side1Edges=side1Edges1, name='Contato_Roda_Direita')
+        
+        # ------------------------------------------------------
+        # STEPS
+        # ------------------------------------------------------
+        
+        mdb.models['Model-1'].StaticStep(name='Step-1', previous='Initial', 
+            maxNumInc=10000000, initialInc=0.01)
+        mdb.models['Model-1'].steps['Step-1'].setValues(nlgeom=ON)
+        session.viewports['Viewport: 1'].assemblyDisplay.setValues(step='Step-1')
+        session.viewports['Viewport: 1'].assemblyDisplay.setValues(interactions=ON, 
+            constraints=ON, connectors=ON, engineeringFeatures=ON, 
+            adaptiveMeshConstraints=OFF)
+            
+        mdb.models['Model-1'].fieldOutputRequests['F-Output-1'].setValues(variables=('S', 
+        'PE', 'PEEQ', 'PEMAG', 'LE', 'U', 'RF', 'CF', 'CSTRESS', 'CDISP', 
+        'CNAREA'))
+        
+        
+        # ------------------------------------------------------
+        # INTERACTIONS
+        # ------------------------------------------------------
+        
+        # Criar propriedade da interação
+        
+        mdb.models['Model-1'].ContactProperty('Atrito')
+
+        # Aplicar coeficiente de atrito
+        #mdb.models['Model-1'].interactionProperties['Atrito'].TangentialBehavior(
+        #    formulation=PENALTY, directionality=ISOTROPIC, slipRateDependency=OFF, 
+        #    pressureDependency=OFF, temperatureDependency=OFF, dependencies=0, 
+        #    table=((0.3, ), ), shearStressLimit=None, maximumElasticSlip=FRACTION, 
+        #    fraction=0.005, elasticSlipStiffness=None)
+        
+        # Criar controle de contato
+        mdb.models['Model-1'].StdContactControl(name='ContCtrl-1', 
+            stabilizeChoice=AUTOMATIC)
+        mdb.models['Model-1'].contactControls['ContCtrl-1'].setValues(
+            zeroDampingChoice=SPECIFY, zeroDamping=10.0)
+        
+        # Criar interações
+        
+        a = mdb.models['Model-1'].rootAssembly
+        region1=a.surfaces['Contato_Trilho_Esquerdo']
+        a = mdb.models['Model-1'].rootAssembly
+        region2=a.surfaces['Contato_Roda_Esquerda']
+        mdb.models['Model-1'].SurfaceToSurfaceContactStd(name='Contato_Esquerdo', 
+            createStepName='Step-1', master=region1, slave=region2, sliding=FINITE, 
+            thickness=ON, interactionProperty='Atrito', 
+            contactControls='ContCtrl-1', adjustMethod=NONE, initialClearance=OMIT, 
+            datumAxis=None, clearanceRegion=None)
+        
+        a = mdb.models['Model-1'].rootAssembly
+        region1=a.surfaces['Contato_Trilho_Direito']
+        a = mdb.models['Model-1'].rootAssembly
+        region2=a.surfaces['Contato_Roda_Direita']
+        mdb.models['Model-1'].SurfaceToSurfaceContactStd(name='Contato_Direito', 
+            createStepName='Step-1', master=region1, slave=region2, sliding=FINITE, 
+            thickness=ON, interactionProperty='Atrito', 
+            contactControls='ContCtrl-1', adjustMethod=NONE, initialClearance=OMIT, 
+            datumAxis=None, clearanceRegion=None)
+        
+        # Criar constraints
+        a = mdb.models['Model-1'].rootAssembly
+        region1=a.sets['RP_Base_Trilho_Esquerdo']
+        a = mdb.models['Model-1'].rootAssembly
+        region2=a.sets['Base_Trilho_Esquerdo']
+        mdb.models['Model-1'].Coupling(name='Trilho_Esquerdo', controlPoint=region1, 
+            surface=region2, influenceRadius=WHOLE_SURFACE, couplingType=KINEMATIC, 
+            localCsys=None, u1=ON, u2=ON, ur3=ON)
+        
+        a = mdb.models['Model-1'].rootAssembly
+        region1=a.sets['RP_Base_Trilho_Direito']
+        a = mdb.models['Model-1'].rootAssembly
+        region2=a.sets['Base_Trilho_Direito']
+        mdb.models['Model-1'].Coupling(name='Trilho_Direito', controlPoint=region1, 
+            surface=region2, influenceRadius=WHOLE_SURFACE, couplingType=KINEMATIC, 
+            localCsys=None, u1=ON, u2=ON, ur3=ON)
+        
+        a = mdb.models['Model-1'].rootAssembly
+        region1=a.sets['RP_Base_Roda_Esquerda']
+        a = mdb.models['Model-1'].rootAssembly
+        region2=a.sets['Base_Roda_Esquerda']
+        mdb.models['Model-1'].Coupling(name='Roda_Esquerda', controlPoint=region1, 
+            surface=region2, influenceRadius=WHOLE_SURFACE, couplingType=KINEMATIC, 
+            localCsys=None, u1=ON, u2=ON, ur3=ON)
+        
+        a = mdb.models['Model-1'].rootAssembly
+        region1=a.sets['RP_Base_Roda_Direita']
+        a = mdb.models['Model-1'].rootAssembly
+        region2=a.sets['Base_Roda_Direita']
+        mdb.models['Model-1'].Coupling(name='Roda_Direita', controlPoint=region1, 
+            surface=region2, influenceRadius=WHOLE_SURFACE, couplingType=KINEMATIC, 
+            localCsys=None, u1=ON, u2=ON, ur3=ON)
+        
+        # Criar wire
+        a = mdb.models['Model-1'].rootAssembly
+        r1 = a.referencePoints
+        a.WirePolyLine(points=((r1[15], r1[12]), (r1[15], r1[13])), mergeType=IMPRINT, 
+            meshable=OFF)
+        
+        # Criar connector section
+        a = mdb.models['Model-1'].rootAssembly
+        e1 = a.edges
+        edges1 = e1.getSequenceFromMask(mask=('[#3 ]', ), )
+        a.Set(edges=edges1, name='Wire-1-Set-1')
+        mdb.models['Model-1'].ConnectorSection(name='Eixo', assembledType=BEAM)
+        
+        # Criar connector assignment
+        a = mdb.models['Model-1'].rootAssembly
+        region=a.sets['Wire-1-Set-1']
+        csa = a.SectionAssignment(sectionName='Eixo', region=region)
+        
+        # --------------------------------------------------
+        # LOADS
+        # --------------------------------------------------
+        
+        # Aplicar restrições
+        a = mdb.models['Model-1'].rootAssembly
+        region = a.sets['RP_Base_Trilho_Direito']
+        mdb.models['Model-1'].EncastreBC(name='Trilho_Direito', 
+            createStepName='Step-1', region=region, localCsys=None)
+            
+        a = mdb.models['Model-1'].rootAssembly
+        region = a.sets['RP_Base_Trilho_Esquerdo']
+        mdb.models['Model-1'].EncastreBC(name='Trilho_Esquerdo', 
+            createStepName='Step-1', region=region, localCsys=None)
+        
+        # Aplicar carga
+        a = mdb.models['Model-1'].rootAssembly
+        r1 = a.referencePoints
+        refPoints1=(r1[15], )
+        region = a.Set(referencePoints=refPoints1, name='Rodeiro')
+        mdb.models['Model-1'].ConcentratedForce(name='Carga', createStepName='Step-1', 
+            region=region, cf2=-3420, distributionType=UNIFORM, field='', 
+            localCsys=None)
+        
+        #Carga: -3.420 N
+        
+        # -----------------------------------------------------
+        # MESH
+        # -----------------------------------------------------
+        
+        p = mdb.models['Model-1'].parts['Roda_Esquerda']
+        session.viewports['Viewport: 1'].setValues(displayedObject=p)
+        session.viewports['Viewport: 1'].partDisplay.setValues(mesh=ON)
+        session.viewports['Viewport: 1'].partDisplay.meshOptions.setValues(
+            meshTechnique=ON)
+        session.viewports['Viewport: 1'].partDisplay.geometryOptions.setValues(
+            referenceRepresentation=OFF)
+        p = mdb.models['Model-1'].parts['Roda_Esquerda']
+        p.seedPart(size=1.0, deviationFactor=0.1, minSizeFactor=0.1)
+        p = mdb.models['Model-1'].parts['Roda_Esquerda']
+        p.generateMesh()
+        elemType1 = mesh.ElemType(elemCode=CPE4R, elemLibrary=STANDARD, 
+            secondOrderAccuracy=OFF, hourglassControl=DEFAULT, 
+            distortionControl=DEFAULT)
+        elemType2 = mesh.ElemType(elemCode=CPE3, elemLibrary=STANDARD)
+        p = mdb.models['Model-1'].parts['Roda_Esquerda']
+        f = p.faces
+        faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
+        pickedRegions =(faces, )
+        p.setElementType(regions=pickedRegions, elemTypes=(elemType1, elemType2))
+        
+        p = mdb.models['Model-1'].parts['Roda_Direita']
+        session.viewports['Viewport: 1'].setValues(displayedObject=p)
+        p = mdb.models['Model-1'].parts['Roda_Direita']
+        p.seedPart(size=1.0, deviationFactor=0.1, minSizeFactor=0.1)
+        p = mdb.models['Model-1'].parts['Roda_Direita']
+        p.generateMesh()
+        elemType1 = mesh.ElemType(elemCode=CPE4R, elemLibrary=STANDARD, 
+            secondOrderAccuracy=OFF, hourglassControl=DEFAULT, 
+            distortionControl=DEFAULT)
+        elemType2 = mesh.ElemType(elemCode=CPE3, elemLibrary=STANDARD)
+        p = mdb.models['Model-1'].parts['Roda_Direita']
+        f = p.faces
+        faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
+        pickedRegions =(faces, )
+        p.setElementType(regions=pickedRegions, elemTypes=(elemType1, elemType2))
+        
+        p = mdb.models['Model-1'].parts['Trilho_Esquerdo']
+        session.viewports['Viewport: 1'].setValues(displayedObject=p)
+        p = mdb.models['Model-1'].parts['Trilho_Esquerdo']
+        p.seedPart(size=1.0, deviationFactor=0.1, minSizeFactor=0.1)
+        p = mdb.models['Model-1'].parts['Trilho_Esquerdo']
+        p.generateMesh()
+        elemType1 = mesh.ElemType(elemCode=CPE4R, elemLibrary=STANDARD, 
+            secondOrderAccuracy=OFF, hourglassControl=DEFAULT, 
+            distortionControl=DEFAULT)
+        elemType2 = mesh.ElemType(elemCode=CPE3, elemLibrary=STANDARD)
+        p = mdb.models['Model-1'].parts['Trilho_Esquerdo']
+        f = p.faces
+        faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
+        pickedRegions =(faces, )
+        p.setElementType(regions=pickedRegions, elemTypes=(elemType1, elemType2))
+        a1 = mdb.models['Model-1'].rootAssembly
+        a1.regenerate()
+        
+        p = mdb.models['Model-1'].parts['Trilho_Direito']
+        session.viewports['Viewport: 1'].setValues(displayedObject=p)
+        p = mdb.models['Model-1'].parts['Trilho_Direito']
+        p.seedPart(size=1.0, deviationFactor=0.1, minSizeFactor=0.1)
+        p = mdb.models['Model-1'].parts['Trilho_Direito']
+        p.generateMesh()
+        elemType1 = mesh.ElemType(elemCode=CPE4R, elemLibrary=STANDARD, 
+            secondOrderAccuracy=OFF, hourglassControl=DEFAULT, 
+            distortionControl=DEFAULT)
+        elemType2 = mesh.ElemType(elemCode=CPE3, elemLibrary=STANDARD)
+        p = mdb.models['Model-1'].parts['Trilho_Direito']
+        f = p.faces
+        faces = f.getSequenceFromMask(mask=('[#1 ]', ), )
+        pickedRegions =(faces, )
+        p.setElementType(regions=pickedRegions, elemTypes=(elemType1, elemType2))
+        a1 = mdb.models['Model-1'].rootAssembly
+        a1.regenerate()
+        
+        # ----------------------------------------------------
+        # JOB
+        # ----------------------------------------------------
+        
+        os.chdir("Diretório onde serão salvos os arquivos de saída da simulação e onde está a planilha excel que será preenchida")
+                
+        job_name = 'Job-1'
+        j_n = list(job_name)
+        ii = aux+1
+        float(ii)
+        j_n[4] = str(ii)
+        job_name = "".join(j_n)
+        
+        mdb.Job(name=job_name, model='Model-1', description='', type=ANALYSIS, 
+            atTime=None, waitMinutes=0, waitHours=0, queue=None, memory=90, 
+            memoryUnits=PERCENTAGE, getMemoryFromAnalysis=True, 
+            explicitPrecision=SINGLE, nodalOutputPrecision=SINGLE, echoPrint=OFF, 
+            modelPrint=OFF, contactPrint=OFF, historyPrint=OFF, userSubroutine='', 
+            scratch='', resultsFormat=ODB, parallelizationMethodExplicit=DOMAIN, 
+            numDomains=nucleos, activateLoadBalancing=False, 
+            multiprocessingMode=DEFAULT, numCpus=nucleos, numGPUs=0)        
+        mdb.jobs[job_name].writeInput(consistencyChecking=OFF)
+        mdb.jobs[job_name].submit(consistencyChecking=OFF)
+        
+        # Rotulação dos dados
+        
+        #float(roda_esquerda)
+        #float(roda_direita)
+        #float(geom_rail_left)
+        #float(geom_rail_right)
+        csvfile.writerow([roda_esquerda,roda_direita,geom_rail_left,geom_rail_right])
