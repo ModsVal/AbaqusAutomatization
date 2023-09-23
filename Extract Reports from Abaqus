@@ -1,0 +1,103 @@
+# -*- coding: utf-8 -*-
+from abaqus import *
+from abaqusConstants import *
+from caeModules import *
+from driverUtils import executeOnCaeStartup
+from odbAccess import *
+import numpy
+import itertools
+import math
+import section
+import regionToolset
+import displayGroupMdbToolset as dgm
+import visualization
+import xyPlot
+import displayGroupOdbToolset as dgo
+import connectorBehavior
+
+os.chdir("D:/Modesto/Catedra/Simulacoes_12_01/Andre")
+
+simulacoes = 1
+
+for i in range(0,simulacoes,1):
+    
+    # Puxar todos os odbs
+    job_name = 'Job-1.odb'
+    j_n = list(job_name)
+    ii = i+1
+    float(ii)
+    j_n[4] = str(ii)
+    job_name = "".join(j_n)
+    
+    
+    # Criar nome para todos os arquivos Job-x.rpt
+    job_rpt = 'Job-1.rpt'
+    j_n = list(job_rpt)
+    ii = i+1
+    float(ii)
+    j_n[4] = str(ii)
+    job_rpt = "".join(j_n)
+    
+    # Criar nome para todos os arquivos u2-x.rpt
+    u2_rpt = 'u2-1.rpt'
+    j_n = list(u2_rpt)
+    ii = i+1
+    float(ii)
+    j_n[3] = str(ii)
+    u2_rpt = "".join(j_n)
+    
+    # Criar nome para todos os arquivos cwr-x.rpt
+    cwr_rpt = 'cwr-1.rpt'
+    j_n = list(cwr_rpt)
+    ii = i+1
+    float(ii)
+    j_n[4] = str(ii)
+    cwr_rpt = "".join(j_n)
+
+    
+    # Abrir odb e inicializar
+    odb = session.openOdb(job_name)
+    session.mdbData.summary()
+    #session.viewports['Viewport: 1'].setValues(
+    #    displayedObject=session.odbs[job_name])
+    
+    o1 = session.openOdb(
+        name=job_name)
+    session.viewports['Viewport: 1'].setValues(displayedObject=o1)
+    
+    # Gerar o relatório
+    odb = session.odbs[job_name]
+    lastframe = odb.steps['Step-1'].frames[-1]
+    
+    nf = NumberFormat(numDigits=6, precision=0, format=SCIENTIFIC)
+    
+    session.fieldReportOptions.setValues(separateTables=ON, numberFormat=nf)
+    
+    #session.writeFieldReport(fileName=job_rpt, append=ON, 
+    #    sortItem='Element Label', odb=odb, step=0, frame=lastframe, 
+    #    outputPosition=ELEMENT_NODAL, variable=(('COPEN', ELEMENT_NODAL), (
+    #    'CPRESS', ELEMENT_NODAL), ('PEEQ', INTEGRATION_POINT), ('S', 
+    #    INTEGRATION_POINT, ((INVARIANT, 'Mises'), )), ))
+    
+    #session.writeFieldReport(fileName=job_rpt, append=ON,
+    #    sortItem='Element Label', odb=odb, step=0, frame=lastframe, 
+    #    outputPosition=ELEMENT_NODAL, variable=(('CPRESS', ELEMENT_NODAL), (
+    #    'PEEQ', INTEGRATION_POINT), ('S', INTEGRATION_POINT, ((INVARIANT, 
+    #    'Mises'), )), ))
+
+    # EXPORTAR RELATÓRIO COM MISES, PEEQ, PRESSÃO DE CONTATO E DESLOCAMENTO
+    session.writeFieldReport(fileName=job_rpt, append=ON, 
+        sortItem='Node Label', odb=odb, step=0, frame=lastframe, outputPosition=NODAL, 
+        variable=(('U', NODAL, ((INVARIANT, 'Magnitude'), )), ('PEEQ', 
+        INTEGRATION_POINT), ('S', INTEGRATION_POINT, ((INVARIANT, 'Mises'), )), 
+        ('CPRESS', ELEMENT_NODAL), ))
+
+    # EXPORTAR RELATÓRIO COM DESLOCAMENTO U2
+    session.writeFieldReport(fileName=u2_rpt, append=ON, sortItem='Node Label', 
+        odb=odb, step=0, frame=lastframe, outputPosition=NODAL, variable=(('U', NODAL, 
+        ((COMPONENT, 'U2'), )), ))
+
+    # EXPORTAR RELATÓRIO COM DADOS DO COMPRIMENTO DE CONTATO
+    session.writeFieldReport(fileName=cwr_rpt, append=ON, 
+        sortItem='Element Label', odb=odb, step=0, frame=lastframe, 
+        outputPosition=ELEMENT_NODAL, variable=(('CNAREA', ELEMENT_NODAL), ))
